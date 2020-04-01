@@ -24,6 +24,17 @@ library(dummies)
 library(ggplot2)
 library(ggpubr)
 library(parallel)
+data(readmission) 
+library(SuperLearner)
+library(gam)
+library(survival)
+library(nleqslv)
+library(rootSolve) 
+library(numDeriv)
+library(reda)
+library(geepack)
+library(dummies)
+library(randomForest)
 
 
 ############################################  Prepare the dataset ####################################################
@@ -195,7 +206,7 @@ ggarrange(p1, p2,ncol = 2, nrow = 1)
 
 
 
-################################################ Fitting results based on pseudo observation #####################################
+################################################ Regression estimator based on pseudo observation #####################################
 ################################################ using generalized linear model (GLM)        #####################################
 
 ## Create pseudo-observations based on pre-specified time points
@@ -214,7 +225,100 @@ CMF2<-stepfun(Output2_MCF$time, c(0,Output2_MCF$MCF))
 difference=(n*(CMF1(GEE_target_time)))-((n-1)*(CMF2(GEE_target_time)))
 }
 )
-Pseudo_value_GEE=matrix(unlist(Pseudo_value_GEE),length(GEE_target_time),n)
+Pseudo_value_GEE=matrix(unlist(Pseudo_value_GEE),length(GEE_target_time),n)  ## pseudo-observations
+
+##### Fit generalized linear model based on pseudo-observations #####
+ID=rep(1:n,each=length(GEE_target_time))
+X1=rep(Chemo,each=length(GEE_target_time))
+X2=rep(Sex,each=length(GEE_target_time))
+X3=rep(duke_C,each=length(GEE_target_time))
+X4=rep(duke_D,each=length(GEE_target_time))
+pseu_value=(as.vector(Pseudo_value_GEE))
+
+time_variable=c()
+for(i in 1:n){
+time_variable=rbind(time_variable,dummy(GEE_target_time, sep = "_"))
+}
+
+GEE_data=as.data.frame(cbind(ID,pseu_value,X1,X2,X3,X4,time_variable))
+xnam <- c(0,names(GEE_data)[3:ncol(GEE_data)])
+fmla <- as.formula(paste("pseu_value ~ ", paste(xnam, collapse= "+")))
+fit_treat<-geese(fmla, id =ID, data = GEE_data,mean.link="log" ,corstr = "independence")
+
+
+##### residual plots based on GLM #####
+
+est_time_treat=fit_treat$beta[5: length(fit_treat$beta)] ##find the corresponding position for target times
+
+PO_estimator_treat=c()
+PO_estimator_nontreat=c()
+
+for(h in 1:length(est_time_treat)){ 
+PO_estimator_treat[h]=mean(exp(est_time_treat[h]+fit_treat$beta[1]*1+fit_treat$beta[2]*Sex+fit_treat$beta[3]*duke_C+fit_treat$beta[4]*duke_D))
+PO_estimator_nontreat[h]=mean(exp(est_time_treat[h]+fit_treat$beta[2]*Sex+fit_treat$beta[3]*duke_C+fit_treat$beta[4]*duke_D
+))
+}
+
+
+Prediction_crf=apply(matrix(c(1:length(est_time_treat)),nrow=1),2,function(ind){
+exp(est_time_treat[ind]+fit_treat$beta[1]*Chemo+fit_treat$beta[2]*Sex+fit_treat$beta[3]*duke_C+fit_treat$beta[4]*duke_D)
+})
+
+Pseudo_residual=Pseudo_value_GEE-t(Prediction_crf) 
+par(mfrow=c(2,3))
+
+Gender=ifelse(Sex==0,"Male","Female")
+Treatment=ifelse(Chemo==0,"Nontreated","Treated")
+
+#### Slected some time points to plot the pseudo-residuals plots ######
+
+q1=which(GEE_target_time==61)
+q2=which(GEE_target_time==206)
+q3=which(GEE_target_time==453)
+q4=which(GEE_target_time==710)
+q5=which(GEE_target_time==896)
+q6=which(GEE_target_time==1266)
+
+
+Pseudo_residual_data1=data.frame(Residual=Pseudo_residual[q1,],Sex=Gender,Chemotherapy=Treatment)
+Pseudo_residual_data2=data.frame(Residual=Pseudo_residual[q2,],Sex=Gender,Chemotherapy=Treatment)
+Pseudo_residual_data3=data.frame(Residual=Pseudo_residual[q3,],Sex=Gender,Chemotherapy=Treatment)
+Pseudo_residual_data4=data.frame(Residual=Pseudo_residual[q4,],Sex=Gender,Chemotherapy=Treatment)
+Pseudo_residual_data5=data.frame(Residual=Pseudo_residual[q5,],Sex=Gender,Chemotherapy=Treatment)
+Pseudo_residual_data6=data.frame(Residual=Pseudo_residual[q6,],Sex=Gender,Chemotherapy=Treatment)
+
+## residuals versus Sex
+po1<-ggplot(Pseudo_residual_data1, aes(x=Sex, y=Residual, fill=Sex)) +
+  geom_boxplot()+ggtitle("t=61")+  xlab("")+theme(plot.title = element_text(hjust = 0.5))+scale_y_continuous(limits = c(-5, 25))
+po2<-ggplot(Pseudo_residual_data2, aes(x=Sex, y=Residual, fill=Sex)) +
+  geom_boxplot()+ggtitle("t=206")+  xlab("")+theme(plot.title = element_text(hjust = 0.5))+scale_y_continuous(limits = c(-5, 25)) 
+po3<-ggplot(Pseudo_residual_data3, aes(x=Sex, y=Residual, fill=Sex)) +
+  geom_boxplot()+ggtitle("t=453")+  xlab("")+theme(plot.title = element_text(hjust = 0.5))+scale_y_continuous(limits = c(-5, 25)) 
+po4<-ggplot(Pseudo_residual_data4, aes(x=Sex, y=Residual, fill=Sex)) +
+  geom_boxplot()+ggtitle("t=710")+  xlab("")+theme(plot.title = element_text(hjust = 0.5))+scale_y_continuous(limits = c(-5, 25)) 
+po5<-ggplot(Pseudo_residual_data5, aes(x=Sex, y=Residual, fill=Sex)) +
+  geom_boxplot()+ggtitle("t=896")+  xlab("")+theme(plot.title = element_text(hjust = 0.5))+scale_y_continuous(limits = c(-5, 25)) 
+po6<-ggplot(Pseudo_residual_data6, aes(x=Sex, y=Residual, fill=Sex)) +
+  geom_boxplot()+ggtitle("t=1266")+  xlab("")+theme(plot.title = element_text(hjust = 0.5))+scale_y_continuous(limits = c(-5, 25))
+ggarrange(po1, po2,po3,po4,po5,po6,ncol = 3, nrow = 2, common.legend = TRUE, legend="bottom")
+
+## residuals versus treatment
+po1<-ggplot(Pseudo_residual_data1, aes(x=Chemotherapy, y=Residual, fill=Chemotherapy)) +
+  geom_boxplot()+ggtitle("t=61")+  xlab("")+theme(plot.title = element_text(hjust = 0.5))+scale_y_continuous(limits = c(-5, 25))
+po2<-ggplot(Pseudo_residual_data2, aes(x=Chemotherapy, y=Residual, fill=Chemotherapy)) +
+  geom_boxplot()+ggtitle("t=206")+  xlab("")+theme(plot.title = element_text(hjust = 0.5))+scale_y_continuous(limits = c(-5, 25)) 
+po3<-ggplot(Pseudo_residual_data3, aes(x=Chemotherapy, y=Residual, fill=Chemotherapy)) +
+  geom_boxplot()+ggtitle("t=453")+  xlab("")+theme(plot.title = element_text(hjust = 0.5))+scale_y_continuous(limits = c(-5, 25)) 
+po4<-ggplot(Pseudo_residual_data4, aes(x=Chemotherapy, y=Residual, fill=Chemotherapy)) +
+  geom_boxplot()+ggtitle("t=710")+  xlab("")+theme(plot.title = element_text(hjust = 0.5))+scale_y_continuous(limits = c(-5, 25)) 
+po5<-ggplot(Pseudo_residual_data5, aes(x=Chemotherapy, y=Residual, fill=Chemotherapy)) +
+  geom_boxplot()+ggtitle("t=896")+  xlab("")+theme(plot.title = element_text(hjust = 0.5))+scale_y_continuous(limits = c(-5, 25)) 
+po6<-ggplot(Pseudo_residual_data6, aes(x=Chemotherapy, y=Residual, fill=Chemotherapy)) +
+  geom_boxplot()+ggtitle("t=1266")+  xlab("")+theme(plot.title = element_text(hjust = 0.5))+scale_y_continuous(limits = c(-5, 25))
+ggarrange(po1, po2,po3,po4,po5,po6,ncol = 3, nrow = 2, common.legend = TRUE, legend="bottom")
+
+
+
 
 
 
