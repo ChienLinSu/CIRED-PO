@@ -2,3 +2,84 @@
 ##  Copyright (C) 2018 The R Foundation for Statistical Computing
 ### Platform: x86_64-w64-mingw32/x64 (64-bit)
 
+
+#################################### Load required R packages ######################################################
+#####################################################################################################################
+library(frailtypack)
+library(mvtnorm)
+library(numDeriv)
+library(Rsolnp)
+library(optimx)
+library(BB)
+library(rootSolve)
+library(survival)
+library(MASS)
+library(survival)
+library(nleqslv)
+library(rootSolve) 
+library(numDeriv)
+library(reda)
+library(geepack)
+library(dummies)
+library(ggplot2)
+library(ggpubr)
+library(parallel)
+
+
+############################################  Prepare the dataset ####################################################
+#######################################################################################################################
+data(readmission) 
+Data=readmission
+Data[,7]=ifelse(Data[,7]=="Treated",1,0) ##chemotherapy (Treated=1; NonTreated=0)
+Data[,8]=ifelse(Data[,8]=="Male",0,1) ##Male=0; Female=1
+Duke_C=ifelse(Data[,9]=="C",1,0) ##Dukes stage(A-B:baseline;)
+Duke_D=ifelse(Data[,9]=="D",1,0)
+Data=cbind(Data,Duke_C,Duke_D)
+n=length(as.numeric(names(table(Data[,1])))) ## number of patients
+
+Chemo=numeric()
+Sex=numeric()
+duke_C=numeric()
+duke_D=numeric()
+
+for(i in 1:n){
+location=which(Data[,1]==names(table(Data[,1]))[i])
+Chemo[i]=Data[location,7][1]
+Sex[i]=Data[location,8][1]
+duke_C[i]=Data[location,12][1]
+duke_D[i]=Data[location,13][1]
+}
+
+
+
+############################################  logistic regression for Propensity score ############################################
+############################################  and the box plots for the weights (IPTW) ############################################
+
+
+mylogic<- glm(Chemo~ Sex+duke_C+duke_D , family = "binomial") ## fit logistic regression
+summary(mylogic)
+mylogic$coef[1]
+mylogic$coef[2]
+
+
+Weight=c()
+for(i in 1:n){
+if(Chemo[i]==1){
+Weight[i]=1+exp(-1*mylogic$coef[1]-mylogic$coef[2]*Sex[i]-mylogic$coef[3]*duke_C[i]-mylogic$coef[4]*duke_D[i])
+}else{
+Weight[i]=1+exp(mylogic$coef[1]+mylogic$coef[2]*Sex[i]+mylogic$coef[3]*duke_C[i]+mylogic$coef[4]*duke_D[i])
+}
+}
+
+
+######################### Box Plot for the weight ###########################
+
+Chemotherapy=ifelse(Chemo==1,"Treat","Non-treat")
+Boxplot_data=data.frame(wt=Weight,trt=Chemotherapy)
+#boxplot(Weight~Chemotherapy,data=Boxplot_data,main="Weight for Cirque Data",whisklty = 1)
+
+bp<-ggplot(Boxplot_data, aes(x=Chemotherapy, y=wt, fill=Chemotherapy)) 
+bp+geom_boxplot()+ stat_boxplot(geom ='errorbar') +
+coord_cartesian(ylim = c(1, 4.5))+  ylab("Weight")+scale_x_discrete(name ="Chemotherapy")
+
+
