@@ -72,7 +72,7 @@ Weight[i]=1+exp(mylogic$coef[1]+mylogic$coef[2]*Sex[i]+mylogic$coef[3]*duke_C[i]
 }
 
 
-######################### Box Plot for the weight ###########################
+###### Box Plot for the weight ######
 
 Chemotherapy=ifelse(Chemo==1,"Treat","Non-treat")
 Boxplot_data=data.frame(wt=Weight,trt=Chemotherapy)
@@ -81,5 +81,154 @@ Boxplot_data=data.frame(wt=Weight,trt=Chemotherapy)
 bp<-ggplot(Boxplot_data, aes(x=Chemotherapy, y=wt, fill=Chemotherapy)) 
 bp+geom_boxplot()+ stat_boxplot(geom ='errorbar') +
 coord_cartesian(ylim = c(1, 4.5))+  ylab("Weight")+scale_x_discrete(name ="Chemotherapy")
+
+
+############################### Regression estimator based on Semiparametric multiplicative rate (SMR) model#######################
+############################### and its corresponding residual plots                                         #######################
+
+## link function h and its derivative
+h_function=function(x){
+exp(x)
+}
+h_deri_function=function(x){
+exp(x)
+}
+
+Obs_time_vec=Data[,"t.stop"]
+Delta_vec=Data[,"event"]
+
+Cen_time_vec=c()
+for(i in 1:length(table(Data[,"id"]))){
+location=which(Data[,"id"]==i & Data[,"event"]==0)
+Cen_time_vec=c(Cen_time_vec,Data[location,"t.stop"])
+}
+number=as.vector(table(Data[,"id"])) ##1:id
+Count=c()
+for(i in 1:length(Obs_time_vec)){
+Count[i]=length(which(Obs_time_vec==Obs_time_vec[i]))
+}
+
+At_risk=matrix(0,n,length(Obs_time_vec))
+for(i in 1:n){
+At_risk[i,]=ifelse(Cen_time_vec[i]>=Obs_time_vec,1,0)
+}
+
+###### Construct estimating equation ######
+Score_function=function(x){
+  
+ est_beta_1<-x[1]
+ est_beta_2<-x[2]
+ est_beta_3<-x[3]
+ est_beta_4<-x[4]
+
+ part2=h_deri_function((est_beta_1*Chemo))*Chemo/h_function((est_beta_1*Chemo))
+ part3=h_deri_function((est_beta_2*Sex))*Sex/h_function((est_beta_2*Sex))
+ part4=h_deri_function((est_beta_3*duke_C))*duke_C/h_function((est_beta_3*duke_C))
+ part5=h_deri_function((est_beta_4*duke_D))*duke_D/h_function((est_beta_4*duke_D))
+
+ Q_i_comp2=rep(part2,as.vector(table((Data[,"id"]))))
+ Q_i_comp3=rep(part3,as.vector(table((Data[,"id"]))))
+ Q_i_comp4=rep(part4,as.vector(table((Data[,"id"]))))
+ Q_i_comp5=rep(part5,as.vector(table((Data[,"id"]))))
+
+ comp2_Qi=matrix(part2,length(Chemo),length(Obs_time_vec))
+ comp3_Qi=matrix(part3,length(Sex),length(Obs_time_vec))
+ comp4_Qi=matrix(part4,length(duke_C),length(Obs_time_vec))
+ comp5_Qi=matrix(part5,length(duke_D),length(Obs_time_vec)) 
+
+ h_matrix=matrix(h_function((est_beta_1*Chemo)+(est_beta_2*Sex)+(est_beta_3*duke_C)+(est_beta_4*duke_D)),length(Chemo),length(Obs_time_vec))
+  
+ Q_bar_comp2=apply(At_risk*comp2_Qi*h_matrix,2,sum)/apply((At_risk*h_matrix),2,sum)
+ Q_bar_comp3=apply(At_risk*comp3_Qi*h_matrix,2,sum)/apply((At_risk*h_matrix),2,sum)
+ Q_bar_comp4=apply(At_risk*comp4_Qi*h_matrix,2,sum)/apply((At_risk*h_matrix),2,sum)
+ Q_bar_comp5=apply(At_risk*comp5_Qi*h_matrix,2,sum)/apply((At_risk*h_matrix),2,sum)
+ h_vec=rep(h_function((est_beta_1*Chemo)+(est_beta_2*Sex)+(est_beta_3*duke_C)+(est_beta_4*duke_D)),as.vector(table(Data[,"id"])))
+   c(sum((Q_i_comp2-Q_bar_comp2)*(Delta_vec-((h_vec*(((Count*Delta_vec)))/apply((At_risk*h_matrix),2,sum))
+))),sum((Q_i_comp3-Q_bar_comp3)*(Delta_vec-((h_vec*(((Count*Delta_vec)))/apply((At_risk*h_matrix),2,sum))
+))),sum((Q_i_comp4-Q_bar_comp4)*(Delta_vec-((h_vec*(((Count*Delta_vec)))/apply((At_risk*h_matrix),2,sum))
+))),sum((Q_i_comp5-Q_bar_comp5)*(Delta_vec-((h_vec*(((Count*Delta_vec)))/apply((At_risk*h_matrix),2,sum))
+)))
+)
+}
+
+xstart <- c(-0.5,-0.7,0,1)
+G.fit=nleqslv(xstart,Score_function, control=list(btol=.01))$x
+
+Baseline=function(t){
+if(t==0){
+total=0
+}else{
+V1=unique(sort(c(0,Obs_time_vec[which(Obs_time_vec<=t & Delta_vec==1   )])))####& Delta_vec==1
+total=sum(apply(matrix(1:length(V1),1,length(V1)),2,FUN=function(ind){
+df=data.frame(x=ifelse(Obs_time_vec==V1[ind] & Delta_vec==1,1,0),id=rep(1:length(Cen_time_vec),number))
+denominator=sum(aggregate(df$x, by=list(df$id), FUN=sum)$x)
+numerator=sum(as.numeric(V1[ind]<=Cen_time_vec)*h_function((G.fit[1]*Chemo)+(G.fit[2]*Sex)+(G.fit[3]*duke_C)+(G.fit[4]*duke_D)))####
+ans=(denominator/numerator)
+}## for function
+))
+}
+return(total)
+}
+
+
+###### residual plots based on SMR model ######
+
+Counting_obsnumber=as.vector(table(Data[,"id"]))-1 ##-1 is for last censored
+##residual_SMR=c()
+XX=matrix(c(1:n),1,n)
+residual_SMR=mclapply(XX,function(t){
+Counting_obsnumber[t]-Baseline(Cen_time_vec[t])*(exp((G.fit[1]*Chemo[t])+(G.fit[2]*Sex[t])+(G.fit[3]*duke_C[t])+(G.fit[4]*duke_D[t])))
+}
+)
+
+residual_SMR=unlist(residual_SMR)
+Gender=ifelse(Sex==0,"Male","Female")
+Treatment=ifelse(Chemo==0,"Nontreated","Treated")
+Boxplot_data=data.frame(Residual=residual_SMR,Sex=Gender,Chemotherapy=Treatment)
+
+p1<-ggplot(Boxplot_data, aes(x=Sex, y=Residual, fill=Sex)) +
+  geom_boxplot()
+p2=ggplot(Boxplot_data, aes(x=Chemotherapy, y=Residual, fill=Chemotherapy)) +
+  geom_boxplot()
+
+ggarrange(p1, p2,ncol = 2, nrow = 1)
+
+
+
+################################################ Fitting results based on pseudo observation #####################################
+################################################ using generalized linear model (GLM)        #####################################
+
+## Create pseudo-observations based on pre-specified time points
+## In general, researchers can choose 5 to 10 equally spaced time points to create pseudo-observations
+## Here, we choose observed time points as a time set to create the pseudo-observations
+
+GEE_target_time=unique(sort(Data[,"t.stop"][which(Data[,"event"]==1)]))
+XX=matrix(c(1:n),1,n)
+Pseudo_value_GEE=mclapply(XX,function(t){ 
+location=which(Data[,"id"]==t)
+delete_data=Data[-location,]
+Output1_MCF=mcf(Recur(t.stop,id,  event) ~ 1, data = Data)@MCF
+Output2_MCF=mcf(Recur(t.stop,id,  event) ~ 1, data = delete_data)@MCF
+CMF1<-stepfun(Output1_MCF$time, c(0,Output1_MCF$MCF))
+CMF2<-stepfun(Output2_MCF$time, c(0,Output2_MCF$MCF))
+difference=(n*(CMF1(GEE_target_time)))-((n-1)*(CMF2(GEE_target_time)))
+}
+)
+Pseudo_value_GEE=matrix(unlist(Pseudo_value_GEE),length(GEE_target_time),n)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
