@@ -360,7 +360,7 @@ est_time_treat=fit_treat$beta[5: length(fit_treat$beta)] ##find the correspondin
 PO_estimator_treat=c()
 PO_estimator_nontreat=c()
 
-for(h in 1:length(target_time)){ ## 5: calcuated at time 0.6,1,2,3,4
+for(h in 1:length(target_time)){
 PO_estimator_treat[h]=mean(exp(est_time_treat[h]+fit_treat$beta[1]*1+fit_treat$beta[2]*Sex+fit_treat$beta[3]*duke_C+fit_treat$beta[4]*duke_D))
 PO_estimator_nontreat[h]=mean(exp(est_time_treat[h]+fit_treat$beta[2]*Sex+fit_treat$beta[3]*duke_C+fit_treat$beta[4]*duke_D
 ))}
@@ -378,12 +378,10 @@ for(g in 1:length(target_time)){
 Reg_treament_value[g,]=Baseline(target_time[g])*exp(G.fit[1]*1+G.fit[2]*Sex+G.fit[3]*duke_C+G.fit[4]*duke_D)
 Reg_control_value[g,]=Baseline(target_time[g])*exp(G.fit[2]*Sex+G.fit[3]*duke_C+G.fit[4]*duke_D)
 DR_G_treat[g]=mean(Pseudo_value_IPW[g,]*Chemo*Weight-(Chemo-pi)*(1/pi)*Reg_treament_value[g,])
- 
 DR_G_nontreat[g]=mean(((1-Chemo)*Pseudo_value_IPW[g,]*(1/(1-pi)))+(Chemo-pi)*(1/(1-pi))*Reg_control_value[g,])
 }
 
-plot(target_time,DR_G_treat)
-plot(target_time,DR_G_nontreat)
+
 
 ################# DR estimator based on PO regression ###########
 
@@ -409,6 +407,7 @@ NA_CMF_nontreat<-stepfun(NA_nontreat_MCF$time, c(0,NA_nontreat_MCF$MCF))
 NA_Treatment=NA_CMF_treat(target_time)
 NA_Nontreatment=NA_CMF_nontreat(target_time)
 
+########### DR estimator based on super learner ########
 
 PS.library <- c("SL.knn", "SL.randomForest","SL.glm")##"SL.glmnet"
 my.library<- c("SL.glm","SL.mean","SL.randomForest")
@@ -416,7 +415,7 @@ my.library<- c("SL.glm","SL.mean","SL.randomForest")
 XX=data.frame(Sex,duke_C,duke_D)
 
 SL_logistic<-SuperLearner(Chemo,XX,newX=XX,family=binomial(),SL.library=PS.library
-                    ,method = "method.NNLS",control = list(), cvControl = list())##verbose = TRUE
+                    ,method = "method.NNLS",control = list(), cvControl = list())
 PS_SL<-SL_logistic$SL.predict
 
 Weight_SL=c() 
@@ -430,7 +429,7 @@ Weight_SL[i]=1/(1-PS_SL[i])
 }
 
 
-X_matrix=data.frame(GEE_data[,c(3:dim(GEE_data)[2])]) ##373
+X_matrix=data.frame(GEE_data[,c(3:dim(GEE_data)[2])]) 
 New_X1=X_matrix
 New_X0=X_matrix
 New_X1$X1=1
@@ -480,10 +479,219 @@ legend("topleft",legend=c("Treat (NA)","Treat (PO)","Treat (DR)","Treat (DR with
 
 
 
+################################################## Test Statistics ###################################################
+######################################################################################################################
+
+#############################################################################################
+#### The following codes are from the function "mcfDiff.test" in the R package "reda"      ##
+#### with little revision so that the test statistics can be calculated at a given time Q ##                                                                                  ##
+#############################################################################################
+
+Test_function=function (mcf1,QT ,mcf2 = NULL, testVariance = c("robust", "Poisson", 
+    "none"), ...) 
+{
+    testVariance <- match.arg(testVariance)
+    #mcfDiff_check(mcf1, mcf2)
+    if (testVariance == "none") 
+        return(methods::new("mcfDiff.test"))
+    if (nrow(mcf1@data) == 0L) {
+        warning("No processed data is available from 'mcf1'.", 
+            call. = FALSE)
+        return(methods::new("mcfDiff.test"))
+    }
+    mcfCols <- c("time", "numRisk", "instRate", "MCF", "se", 
+        "lower", "upper")
+    nColMcf <- length(mcfCols)
+    mcfColInd <- seq_len(nColMcf)
+    datCols <- c("ID", "time", "event", "origin")
+    nColDat <- length(datCols)
+    datColInd <- seq_len(nColDat)
+    time <- NULL
+    conv2Survr <- function(mcf_obj) {
+        dat <- mcf_obj@data
+        first_idx <- !duplicated(dat$id)
+        origin_vec <- rep(dat$time1[first_idx], table(factor(dat$id)))
+        out <- data.frame(ID = dat$id, time = dat$time2, event = dat$event, 
+            origin = origin_vec)
+        dat$time1 <- dat$time2 <- dat$id <- dat$event <- dat$terminal <- NULL
+        mcf_obj@data <- cbind(out, dat)
+        mcf_obj
+    }
+    mcf1 <- conv2Survr(mcf1)
+    if (!is.null(mcf2)) {
+        mcf2 <- conv2Survr(mcf2)
+    }
+    if (mcf1@multiGroup) {
+        nLevel <- length(mcf1@origin)
+        if (nLevel > 2) 
+            stop("There were more than two groups in 'mcf1'.", 
+                call. = FALSE)
+        uniLevs <- names(mcf1@origin)
+        if (!is.null(mcf2)) 
+            warning("Only the 'mcf1' object was used.", call. = FALSE)
+        getLevs <- function(dat, colInd) {
+            paste_ <- function(...) paste(..., sep = "_")
+            sapply(seq_len(nrow(dat)), function(i, colInd) {
+                paste_(dat[i, -colInd])
+            }, colInd)
+        }
+        datLevs <- getLevs(mcf1@data, datColInd)
+        mcfDatLevs <- getLevs(mcf1@MCF, mcfColInd)
+        eventDat1 <- base::subset(mcf1@data, datLevs %in% uniLevs[1L])
+        mcfDat1 <- base::subset(mcf1@MCF, mcfDatLevs %in% uniLevs[1L], 
+            select = mcfCols)
+        eventDat2 <- base::subset(mcf1@data, datLevs %in% uniLevs[2L])
+        mcfDat2 <- base::subset(mcf1@MCF, mcfDatLevs %in% uniLevs[2L], 
+            select = mcfCols)
+        originVec <- mcf1@origin
+    }
+    else {
+        if (is.null(mcf2)) 
+            stop(wrapMessages("The object 'mcf2' cannot be missing", 
+                "if the object 'mcf1' only contains MCF for one group."), 
+                call. = FALSE)
+        if (mcf2@multiGroup) 
+            stop(wrapMessages("The object 'mcf2' should contain MCF for only one group."), 
+                call. = FALSE)
+        if (nrow(mcf2@data) == 0L) {
+            warning("No processed data is available from 'mcf2'.", 
+                call. = FALSE)
+            return(methods::new("mcfDiff.test"))
+        }
+        eventDat1 <- mcf1@data
+        mcfDat1 <- mcf1@MCF[, mcfCols]
+        eventDat2 <- mcf2@data
+        mcfDat2 <- mcf2@MCF[, mcfCols]
+        originVec <- c(mcf1@origin, mcf2@origin)
+    }
+    if (diff(originVec) != 0) 
+        warning(wrapMessages("The earliest time origins of the two groups were not the same!"), 
+            call. = FALSE)
+    y_k <- function(eventDat, newTimes) {
+        endIdx <- !duplicated(eventDat$ID, fromLast = TRUE)
+        endTimeVec <- eventDat$time[endIdx]
+        originVec <- eventDat$origin[endIdx]
+        if (length(unique(originVec)) > 1) {
+            sapply(newTimes, function(a) {
+                sum(a >= originVec & a <= endTimeVec)
+            })
+        }
+        else {
+            sapply(newTimes, function(a) {
+                sum(a <= endTimeVec)
+            })
+        }
+    }
+    dLambda_k <- function(mcfDat, newTimes) {
+        tmpDat <- base::subset(mcfDat, time %in% newTimes)
+        res <- rep(0, length(newTimes))
+        names(res) <- as.character(newTimes)
+        res[as.character(tmpDat$time)] <- tmpDat$instRate
+        res
+    }
+    uniTimeVec <- sort(unique(c(mcfDat1$time, mcfDat2$time)))[which(sort(unique(c(mcfDat1$time, mcfDat2$time)))<=QT)]
+      yVec1 <- y_k(eventDat1, uniTimeVec)
+    yVec2 <- y_k(eventDat2, uniTimeVec)
+    nonZeroIdx <- yVec1 > 0 & yVec2 > 0
+    uniTimeVec <- uniTimeVec[nonZeroIdx]
+    yVec1 <- yVec1[nonZeroIdx]
+    yVec2 <- yVec2[nonZeroIdx]
+    tau <- max(uniTimeVec)
+    a_u <- (tau - uniTimeVec)/tau
+    w_const <- (yVec1 * yVec2)/(yVec1 + yVec2)
+    max_w_const <- max(w_const)
+    w_linear <- a_u * w_const
+    dLambda1 <- dLambda_k(mcfDat1, uniTimeVec)
+    dLambda2 <- dLambda_k(mcfDat2, uniTimeVec)
+    jumpDiff <- dLambda1 - dLambda2
+    max_jumpDiff <- max(abs(jumpDiff))
+    if (max_jumpDiff > 0) {
+        re_jumpDiff <- jumpDiff/max_jumpDiff
+        reFactor <- exp(log(max_jumpDiff) + log(max_w_const))
+    }
+    else {
+        re_jumpDiff <- 0
+        reFactor <- 1
+    }
+    testU_const <- sum(w_const/max_w_const * re_jumpDiff) * reFactor
+    testU_linear <- sum(w_linear/max_w_const * re_jumpDiff) * 
+        reFactor
+    if (testVariance == "Poisson") {
+        varComp <- ifelse(yVec1 > 0, dLambda1/yVec1, 0) + ifelse(yVec2 > 
+            0, dLambda2/yVec2, 0)
+        varU_const <- sum(w_const^2 * varComp)
+        varU_linear <- sum(w_linear^2 * varComp)
+        varU <- c(varU_const, varU_linear)
+    }
+    else {
+        var_comp <- function(subDat, yVec, dLambda, uniTimeVec, 
+            w_const, w_linear, max_w_const) {
+            tmpDat <- base::subset(subDat, time %in% uniTimeVec)
+            origin <- subDat$origin[1L]
+            cenTime <- with(subDat, time[event <= 0])
+            y_i_tj <- as.numeric(uniTimeVec >= origin & uniTimeVec <= 
+                cenTime)
+            n_i_tj <- rep(0, length(uniTimeVec))
+            names(n_i_tj) <- as.character(uniTimeVec)
+            tj_i <- unique(tmpDat$time)
+            n_i_tj[as.character(tj_i)] <- if (any(duplicated(tmpDat$time))) {
+                with(tmpDat, tapply(event, time, sum))
+            }
+            else {
+                tmpDat$event
+            }
+            res_ij <- ifelse(yVec > 0, y_i_tj/yVec * (n_i_tj - 
+                dLambda), 0)
+            max_res_ij <- max(abs(res_ij))
+            if (max_res_ij > 0) {
+                re_res_ij <- res_ij/max_res_ij
+                reFactor <- exp(log(max_res_ij) + log(max_w_const))
+            }
+            else {
+                re_res_ij <- 0
+                reFactor <- 1
+            }
+            res_const <- (w_const/max_w_const) * re_res_ij
+            res_linear <- (w_linear/max_w_const) * re_res_ij
+            c(const = (sum(res_const) * reFactor)^2, linear = (sum(res_linear) * 
+                reFactor)^2)
+        }
+        varList1 <- by(eventDat1[, c("ID", "time", "event", "origin")], 
+            eventDat1$ID, FUN = var_comp, yVec = yVec1, dLambda = dLambda1, 
+            uniTimeVec = uniTimeVec, w_const = w_const, w_linear = w_linear, 
+            max_w_const = max_w_const, simplify = FALSE)
+        varList2 <- by(eventDat2[, c("ID", "time", "event", "origin")], 
+            eventDat2$ID, FUN = var_comp, yVec = yVec2, dLambda = dLambda2, 
+            uniTimeVec = uniTimeVec, w_const = w_const, w_linear = w_linear, 
+            max_w_const = max_w_const, simplify = FALSE)
+        varU_1 <- if (nrow(mcfDat1) > 1) {
+            colSums(do.call(rbind, varList1))
+        }
+        else {
+            do.call(c, varList1)
+        }
+        varU_2 <- if (nrow(mcfDat2) > 1) {
+            colSums(do.call(rbind, varList2))
+        }
+        else {
+            do.call(c, varList2)
+        }
+        varU <- varU_1 + varU_2
+    }
+    outTab <- methods::new("mcfDiff.test")
+    outTab[, 1L] <- c(testU_const, testU_linear)
+    outTab[, 2L] <- varU
+    outTab[, 3L] <- outTab[, 1L]^2/outTab[, 2L]
+    outTab[, 4L] <- 1
+    outTab[, 5L] <- stats::pchisq(outTab[, 3L], df = outTab[, 
+        4L], lower.tail = FALSE)
+    outTab@testVariance <- testVariance
+    outTab
+}
 
 
-
-
+mcf0 <- mcf(Recur(t.stop,id, event) ~ chemo, data = Data)
+Test_function(mcf0,1800)
 
 
 
