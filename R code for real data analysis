@@ -308,6 +308,178 @@ ggarrange(po1, po2,po3,po4,po5,po6,ncol = 3, nrow = 2, common.legend = TRUE, leg
 
 
 
+#################################################### Plot cumulative rate function ###############################################
+#################################################################################################################################
+
+## choose time points to plot cumulative rate functions
+target_time=unique(sort(Data[,"t.stop"])) ## observed time points
+#target_time=seq(min(unique(sort(Data[,"t.stop"]))),max(unique(sort(Data[,"t.stop"]))),by=218) ## 10 points
+
+################ IPTW estimator #################
+Pseudo_value_IPW=apply(matrix(c(1:n),1,n),2,function(t){ 
+location=which(Data[,"id"]==t)
+delete_data=Data[-location,]
+Output1_MCF=mcf(Recur(t.stop,id,  event) ~ 1, data = Data)@MCF
+Output2_MCF=mcf(Recur(t.stop,id,  event) ~ 1, data = delete_data)@MCF
+CMF1<-stepfun(Output1_MCF$time, c(0,Output1_MCF$MCF))
+CMF2<-stepfun(Output2_MCF$time, c(0,Output2_MCF$MCF))
+difference=(n*(CMF1(target_time)))-((n-1)*(CMF2(target_time)))
+}
+)
+
+IPTW_treat=c()
+IPTW_nontreat=c()
+for(i in 1:dim(Pseudo_value_IPW)[1]){
+IPTW_treat[i]=mean(Pseudo_value_IPW[i,]*Chemo*Weight)
+IPTW_nontreat[i]=mean(Pseudo_value_IPW[i,]*(1-Chemo)*Weight)
+}
+
+
+################ Based on GLM using pseudo-observations ################
+
+Pseudo_value_GEE=matrix(unlist(Pseudo_value_IPW),length(target_time),n)
+ID=rep(1:n,each=length(target_time))
+X1=rep(Chemo,each=length(target_time))
+X2=rep(Sex,each=length(target_time))
+X3=rep(duke_C,each=length(target_time))
+X4=rep(duke_D,each=length(target_time))
+pseu_value=(as.vector(Pseudo_value_GEE))
+
+time_variable=c()
+for(i in 1:n){
+time_variable=rbind(time_variable,dummy(target_time, sep = "_"))
+}
+
+GEE_data=as.data.frame(cbind(ID,pseu_value,X1,X2,X3,X4,time_variable))
+xnam <- c(0,names(GEE_data)[3:ncol(GEE_data)])
+fmla <- as.formula(paste("pseu_value ~ ", paste(xnam, collapse= "+")))
+fit_treat<-geese(fmla, id =ID, data = GEE_data,mean.link="log" ,corstr = "independence")
+
+
+est_time_treat=fit_treat$beta[5: length(fit_treat$beta)] ##find the corresponding position for target times
+PO_estimator_treat=c()
+PO_estimator_nontreat=c()
+
+for(h in 1:length(target_time)){ ## 5: calcuated at time 0.6,1,2,3,4
+PO_estimator_treat[h]=mean(exp(est_time_treat[h]+fit_treat$beta[1]*1+fit_treat$beta[2]*Sex+fit_treat$beta[3]*duke_C+fit_treat$beta[4]*duke_D))
+PO_estimator_nontreat[h]=mean(exp(est_time_treat[h]+fit_treat$beta[2]*Sex+fit_treat$beta[3]*duke_C+fit_treat$beta[4]*duke_D
+))}
+
+
+####################### DR estimator based on SMR regression model #########
+
+
+Reg_treament_value=matrix(0,length(target_time),n)
+Reg_control_value=matrix(0,length(target_time),n)
+DR_G_treat=c()
+DR_G_nontreat=c()
+
+for(g in 1:length(target_time)){
+Reg_treament_value[g,]=Baseline(target_time[g])*exp(G.fit[1]*1+G.fit[2]*Sex+G.fit[3]*duke_C+G.fit[4]*duke_D)
+Reg_control_value[g,]=Baseline(target_time[g])*exp(G.fit[2]*Sex+G.fit[3]*duke_C+G.fit[4]*duke_D)
+DR_G_treat[g]=mean(Pseudo_value_IPW[g,]*Chemo*Weight-(Chemo-pi)*(1/pi)*Reg_treament_value[g,])
+ 
+DR_G_nontreat[g]=mean(((1-Chemo)*Pseudo_value_IPW[g,]*(1/(1-pi)))+(Chemo-pi)*(1/(1-pi))*Reg_control_value[g,])
+}
+
+plot(target_time,DR_G_treat)
+plot(target_time,DR_G_nontreat)
+
+################# DR estimator based on PO regression ###########
+
+DR_PO_treat=c()
+DR_PO_nontreat=c()
+for(g in 1:length(target_time)){
+DR_PO_treat[g]=mean(Pseudo_value_IPW[g,]*Chemo*Weight-(Chemo-pi)*(1/pi)*PO_estimator_treat[g])
+DR_PO_nontreat[g]=mean(((1-Chemo)*Pseudo_value_IPW[g,]*(1/(1-pi)))+(Chemo-pi)*(1/(1-pi))*PO_estimator_nontreat[g])
+}
+ 
+
+############ Nelson Aalen estimator ##############
+Treat_data=Data[which(Data[,"chemo"]==1),]
+Nontreat_data=Data[which(Data[,"chemo"]==0),]
+
+
+NA_treat_MCF=mcf(Recur( t.stop,id, event) ~ 1, data = Treat_data)@MCF
+NA_nontreat_MCF=mcf(Recur( t.stop,id, event) ~ 1, data = Nontreat_data)@MCF
+
+NA_CMF_treat<-stepfun(NA_treat_MCF$time, c(0,NA_treat_MCF$MCF))
+NA_CMF_nontreat<-stepfun(NA_nontreat_MCF$time, c(0,NA_nontreat_MCF$MCF))
+
+NA_Treatment=NA_CMF_treat(target_time)
+NA_Nontreatment=NA_CMF_nontreat(target_time)
+
+
+PS.library <- c("SL.knn", "SL.randomForest","SL.glm")##"SL.glmnet"
+my.library<- c("SL.glm","SL.mean","SL.randomForest")
+
+XX=data.frame(Sex,duke_C,duke_D)
+
+SL_logistic<-SuperLearner(Chemo,XX,newX=XX,family=binomial(),SL.library=PS.library
+                    ,method = "method.NNLS",control = list(), cvControl = list())##verbose = TRUE
+PS_SL<-SL_logistic$SL.predict
+
+Weight_SL=c() 
+
+for(i in 1:n){
+if(Chemo[i]==1){
+Weight_SL[i]=1/PS_SL[i]
+}else{
+Weight_SL[i]=1/(1-PS_SL[i])
+}
+}
+
+
+X_matrix=data.frame(GEE_data[,c(3:dim(GEE_data)[2])]) ##373
+New_X1=X_matrix
+New_X0=X_matrix
+New_X1$X1=1
+New_X0$X1=0
+
+
+PO_SL_treat=SuperLearner(GEE_data$pseu_value, X_matrix,newX=New_X1, family = gaussian(),
+                  SL.library =my.library,id=GEE_data$ID,,method = "method.NNLS",control = list(), cvControl = list())
+
+PO_SL_untreat=SuperLearner(GEE_data$pseu_value, X_matrix,newX=New_X0, family = gaussian(),
+                  SL.library =my.library,id=GEE_data$ID,,method = "method.NNLS",control = list(), cvControl = list())
+
+CRF_treat_SL<-PO_SL_treat$SL.predict
+CRF_untreat_SL<-PO_SL_untreat$SL.predict
+
+treat_po_treat=list()
+treat_po_untreat=list()
+
+qq=length(target_time)
+for(k in 1:n){
+treat_po_treat[[k]]=CRF_treat_SL[(qq*(k-1)+1):(qq*k)]
+treat_po_untreat[[k]]=CRF_untreat_SL[(qq*(k-1)+1):(qq*k)]
+}
+
+CRF_treatment=c()
+CRF_nontreatment=c()
+
+for(k in 1:length(target_time)){
+d1=as.vector(unlist(lapply(treat_po_treat, "[[", k)))
+h1=as.vector(unlist(lapply(treat_po_untreat, "[[", k)))
+CRF_treatment[k]=mean(Pseudo_value_IPW[k,]*Chemo*Weight_SL-(Chemo-PS_SL)*(1/PS_SL)*d1)
+CRF_nontreatment[k]=mean(((1-Chemo)*Pseudo_value_IPW[k,]*(1/(1-PS_SL)))+(Chemo-PS_SL)*(1/(1-PS_SL))*h1)
+}
+
+
+
+plot(target_time,NA_Treatment,type="l",lty=3,col="2",xlab="Time (days)",ylab="Cumulative Number of Hospital Readmission",main="The Estimated Cumulative Rate Functions")
+lines(target_time,PO_estimator_treat,col="2",lty=2)
+lines(target_time,DR_PO_treat,col="2",lty=1)
+lines(target_time,CRF_treatment,col="3",lty=5)
+lines(target_time,NA_Nontreatment,col="4",lty=3)
+lines(target_time,PO_estimator_nontreat,col="4",lty=2)
+lines(target_time,DR_PO_nontreat,col="4",lty=1)
+lines(target_time,CRF_nontreatment,col="5",lty=5)
+legend("topleft",legend=c("Treat (NA)","Treat (PO)","Treat (DR)","Treat (DR with SL)","Nontreat (NA)","Nontreat (PO)","Nontreat (DR)","Nontreat (DR with SL)"),
+       col=c("2", "2","2","3","4","4","4","5"),lty=c(3,2,1,5,3,2,1,5), cex=0.85)
+
+
+
 
 
 
