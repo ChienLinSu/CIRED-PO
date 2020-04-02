@@ -474,5 +474,3 @@ lines(target_time,CRF_nontreatment,col="5",lty=5)
 legend("topleft",legend=c("Treat (NA)","Treat (PO)","Treat (DR)","Treat (DR with SL)","Nontreat (NA)","Nontreat (PO)","Nontreat (DR)","Nontreat (DR with SL)"),
        col=c("2", "2","2","3","4","4","4","5"),lty=c(3,2,1,5,3,2,1,5), cex=0.85)
 
-
-
