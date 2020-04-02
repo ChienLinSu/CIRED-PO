@@ -162,7 +162,7 @@ V1=unique(sort(c(0,Obs_time_vec[which(Obs_time_vec<=t & Delta_vec==1   )])))####
 total=sum(apply(matrix(1:length(V1),1,length(V1)),2,FUN=function(ind){
 df=data.frame(x=ifelse(Obs_time_vec==V1[ind] & Delta_vec==1,1,0),id=rep(1:length(Cen_time_vec),number))
 denominator=sum(aggregate(df$x, by=list(df$id), FUN=sum)$x)
-numerator=sum(as.numeric(V1[ind]<=Cen_time_vec)*h_function((G.fit[1]*Chemo)+(G.fit[2]*Sex)+(G.fit[3]*duke_C)+(G.fit[4]*duke_D)))####
+numerator=sum(as.numeric(V1[ind]<=Cen_time_vec)*h_function((G.fit[1]*Chemo)+(G.fit[2]*Sex)+(G.fit[3]*duke_C)+(G.fit[4]*duke_D)))
 ans=(denominator/numerator)
 }## for function
 ))
@@ -473,16 +473,6 @@ lines(target_time,DR_PO_nontreat,col="4",lty=1)
 lines(target_time,CRF_nontreatment,col="5",lty=5)
 legend("topleft",legend=c("Treat (NA)","Treat (PO)","Treat (DR)","Treat (DR with SL)","Nontreat (NA)","Nontreat (PO)","Nontreat (DR)","Nontreat (DR with SL)"),
        col=c("2", "2","2","3","4","4","4","5"),lty=c(3,2,1,5,3,2,1,5), cex=0.85)
-
-
-
-
-
-
-
-
-
-
 
 
 
